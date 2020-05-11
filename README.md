@@ -1,2 +1,2 @@
 # TFM---MADM
-Repositorio que contiene los codigos utilizados para el analisis de dados implementado en la tesisina de maestria "Encuestas Políticas y Cotización de Empresas en el Mercado Continuo Español". Master MADM de la UIB
+Repository containing the codes used for data analysis implemented in the master's thesis "Political Surveys and Quotation of Companies in the Spanish Continuous Market". Master MADM of the UIB.
