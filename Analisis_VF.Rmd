@@ -114,25 +114,15 @@ colnames(Data1)
 # Sobre Tasa de cambio de precio en el dia
 form <- Delta.Price.day.T ~ IBEX #forma1
 form1 <- Delta.Price.day.T ~ AVCjt + IBEX #forma2
-# ?plm
+
 model0 <- plm(form, data =Data1, effect = "individual", model = "random", index = c("EMP","Date"))
 model0.1 <- plm(form1, data =Data1, effect = "individual", model = "random", index = c("EMP","Date"))
-# phtest(model0,model0.1, model = c("pooling", "random"))
-# escojo modelo 0 aceptando la hipotesis
+
 summary(model0)
 getwd()
+
 # texreg::htmlreg(list(model0, model0.1),caption = c("Modelo 1 y 2"),file='Mod1.doc')
 # ?texreg::htmlreg
-
-# Model 1:
-# form<- Delta.Price.day.T ~ PP.y*PP.x+ PNV.y*PNV.x+ PSOE.y*PSOE.x+ CIU.y*CIU.x+ ERC.y*ERC.x+ UPN.y*UPN.x+
-#   PP.y+ PNV.y+ PSOE.y+ CIU.y+ ERC.y+ UPN.y+ 
-#   PP.x+ PNV.x+ PSOE.x+ CIU.x+ ERC.x+ UPN.x+ 
-#   IBEX
-# model1 <- plm(form, data =Data1, effect = "individual", model = "pooling", index = c("EMP","Date"))
-# # model1.1 <- plm(form, data =Data1, effect = "individual", model = "random", index = c("EMP","Date"))
-# # escojo modelo 1.1 rechazando la hipotesis
-# summary(model1)
 
 ```
 
