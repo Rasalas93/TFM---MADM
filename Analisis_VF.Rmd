@@ -1,0 +1,1552 @@
+---
+title: "Entrega8"
+author: "Yo"
+date: "2/5/2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Entrega 8
+
+Con forme a la base definitiva despues del tratamiento empezamos con las regreciones iniciales, para ello se realiza la carga de los datos y se calculan las variables necesarias
+
+```{r Carga, include=FALSE}
+# // --- Asignacion de Directorio --- //
+cat("\014")
+getwd()
+# setwd("/home/brayan/Documents/TFM/R-Code")
+
+# // --- Librerias --- //
+
+library(tidyverse)
+library(lubridate)
+library(dummy)
+library(dummies)
+library(plm)
+library(ggplot2)
+library(texreg)
+
+
+# // --- Carga de tablas --- //
+Data <- read.csv("Panel2.csv")
+Data$Date <- as.Date(Data$Date,"%Y-%m-%d")
+Data$Nota.Presa <- as.Date(Data$Nota.Presa,"%Y-%m-%d")
+
+# ----- Seleccion de datos por fecha ----- #
+Data <- Data %>% filter(Date < '2012-12-31')
+```
+
+### Validacion Dataset
+
+```{r echo=TRUE}
+# Limpieza bases de alta dispercion
+Emp_delete <- Data %>% group_by(EMP) %>% summarise(disp = max(abs(Delta.Price.day.T),na.rm = T)) %>% filter(disp > 0.75)
+Data <- Data[!(Data$EMP %in% Emp_delete$EMP),]
+Emp_delete <- unique(Data$EMP[Data$PP.y == 1 & Data$PSOE.y == 1]) # ------------- Si quiero quitar 2ble relacion
+Emp_delete
+Data <- Data[!(Data$EMP %in% Emp_delete),] # ------------- Si quiero quitar 2ble relacion
+Companies <- levels(Data$EMP)[levels(Data$EMP) %in% unique(Data$EMP)]
+```
+
+### Creacion de variables:
+
+```{r varibles, echo = FALSE}
+# // --- Creacion Variables --- //
+Data$P.AVCjt <-(Data$PSOE.x*Data$PSOE.y)
+Data$P.AVCjt <- Data$P.AVCjt + (Data$PP.x*Data$PP.y)
+Data$P.AVCjt <- Data$P.AVCjt + (Data$PNV.x*Data$PNV.y)
+Data$P.AVCjt <- Data$P.AVCjt + (Data$CIU.x*Data$CIU.y)
+Data$P.AVCjt <- Data$P.AVCjt + (Data$ERC.x*Data$ERC.y)
+Data$P.AVCjt <- Data$P.AVCjt + (Data$UPN.x*Data$UPN.y)
+Data$N.Party <- Data$PP.y+Data$PNV.y+Data$PSOE.y+Data$CIU.y+Data$ERC.y+Data$UPN.y
+Data$AVCjt <-(Data$P.AVCjt)/(Data$N.Party+(Data$N.Party==0))
+Data$M.Vote <- round(apply(Data[,12:35],1,mean),2)
+
+# filter(Data, Data$Enquesta == 1 & Data$Date == '2007-11-22' ) %>% view
+
+# // --- Seleccion de datos --- //
+x <- c(1,5,8:10,17,25,29,31,32,34,37:ncol(Data))
+Data1 <- Data[,x]
+Data1$Cijt <-  apply(Data[,c(40:48)],1,max)
+
+length(unique(Data$EMP[Data$N.Party > 0]))
+```
+
+Tomamos el Dataframe "Data2" sobre el cual haremos las primeras regreciones, a continuacion el significado de las distintas variables
+
+```{r varibles2, echo = TRUE}
+colnames(Data1)
+```
+
+1. Date: Fecha del evento 
+2. Open: Valor financiero de la accion de la empresa con la que abre el mercado
+3. High: Valor financiero de la accion maximo en el dia
+4. Low: Valor financiero de la accion minimoen el dia
+5. Close: Valor financiero de la accion de la empresa con la que cierra el mercado
+6. Adj.Close: Ajuste del cierre
+7. Volume: Cantidad de acciones negociadas en el dia
+8. EMP: Empresa
+9. Delta.Price.day: cambio de precio del cierre con respecto a la apertura
+10. Delta.Price: Cambio del cierre de precio del dia con respecto al dia anterior
+11. Delta.Price.part: Relacion del cambio de precio con respecto al precio de apertura 
+12. Delta.Price.day.part: Relacion del cambio de precio diario, con respecto al precio de cierre del dia anterior
+13. Delta.Price.T: logaritmo neperiano de Delta.Price.part
+14. Delta.Price.day.T: logaritmo neperiano de Delta.Price.day.part
+15. P.AVCjt: Suma del cambio de intencion de voto de los partidos conectados
+16. N.Party: Total de partidos conectados en ese instante de tiempo
+17. AVCjt: promedio de cambio de intencion de voto de los partidos conectados.
+18. M.Vote: promedio de cambio de intencion de voto de todos los partidos
+19. Cijt: Dummy con valor 1 si la compañia y el partido estan conectados
+20. Encuesta: Dummy con valor 1 si se reealizo encuesta ese dia
+21. DVentana: Variable que resalta las ventanas de cambio, el dia antes, durante y despues de la encuesta
+22. Partido.x: Las diferentes varibles que corresponden al cambio en la intencion de voto en cada partido
+23. Partido.y: Dummy con valor 1 si el partido esta conectado con la empresa
+
+### Ejecutamos los modelos iniciales
+
+```{r Lineal_model, echo = TRUE}
+# // --- Modelos Iniciales --- //
+# Sobre Tasa de cambio de precio dia con respecto al dia anterior
+# Model 0:
+# Sobre Tasa de cambio de precio en el dia
+form <- Delta.Price.day.T ~ IBEX #forma1
+form1 <- Delta.Price.day.T ~ AVCjt + IBEX #forma2
+# ?plm
+model0 <- plm(form, data =Data1, effect = "individual", model = "random", index = c("EMP","Date"))
+model0.1 <- plm(form1, data =Data1, effect = "individual", model = "random", index = c("EMP","Date"))
+# phtest(model0,model0.1, model = c("pooling", "random"))
+# escojo modelo 0 aceptando la hipotesis
+summary(model0)
+getwd()
+# texreg::htmlreg(list(model0, model0.1),caption = c("Modelo 1 y 2"),file='Mod1.doc')
+# ?texreg::htmlreg
+
+# Model 1:
+# form<- Delta.Price.day.T ~ PP.y*PP.x+ PNV.y*PNV.x+ PSOE.y*PSOE.x+ CIU.y*CIU.x+ ERC.y*ERC.x+ UPN.y*UPN.x+
+#   PP.y+ PNV.y+ PSOE.y+ CIU.y+ ERC.y+ UPN.y+ 
+#   PP.x+ PNV.x+ PSOE.x+ CIU.x+ ERC.x+ UPN.x+ 
+#   IBEX
+# model1 <- plm(form, data =Data1, effect = "individual", model = "pooling", index = c("EMP","Date"))
+# # model1.1 <- plm(form, data =Data1, effect = "individual", model = "random", index = c("EMP","Date"))
+# # escojo modelo 1.1 rechazando la hipotesis
+# summary(model1)
+
+```
+
+### Funciónes 
+
+Se crean funciones para los distintos procesos del Event study:
+
+1. NormalReturns_v2: Regresion
+2. CAR: Retornos anormales acumulados
+3. Tao2: asignacion del dia con punto 0 en la fecha del evento
+4. Create_News_v2: Clasificacion de Noticias para partidos PP y PSOE
+5. Create_News_PP: Clasificacion de Noticias para PP
+6. Create_News_PSOE: Clasificacion de Noticias para PSOE
+7. Create_News_v3: Clasificacion de Noticias para todos los partidos
+8. New_Conection: Conexiones version 2 (una vez conectado siempre conectado)
+
+```{r Funtions, echo = FALSE}
+# // --- Regrecion y Prediccion --- //
+NormalReturns_v2 <- function(Data,n,Companies,m) {
+  Data$Enquesta_F <- 0
+  DataX <- Data
+  # Companies <- levels(DataX$EMP)[table(DataX$EMP, DataX$TNew)>0]
+  for(j in 1:length(Companies)){
+    Emp <- DataX[DataX$EMP == Companies[j],]
+    a <- 1
+    b <- 1
+    test <- as.data.frame(Emp[a:b,])
+    test$ER <- 0
+    a <- 2
+    for (i in 2:nrow(Emp)) {
+      if (Emp$Enquesta[i] == 1 & i > (m+n)) {
+        Emp$Enquesta_F[i] <- 1
+        b = i
+        x <- Emp[(i-m-1):(b-n+1),]
+        fit <- lm(Rt ~ Rm, data=x)
+        x <- Emp[a:(b+n-1),]
+        ER <- predict.lm(fit, newdata = x)
+        x <- cbind(as.data.frame(x),ER)
+        test <- rbind(test,x)
+        i = i + n
+        a = i
+      }
+    }
+    if (i == nrow(Emp)){
+      b = i
+      x <- Emp[a:b,]
+      fit <- lm(Rt ~ Rm, data=x)
+      ER <- predict.lm(fit, newdata = x)
+      x <- cbind(as.data.frame(x),ER)
+      test <- rbind(test,x)
+    }
+    if (j == 1){
+      AbRt <- test
+    } else {
+      AbRt <- rbind(AbRt,test)
+    }
+  }
+  AbRt$AR <- AbRt$Rt - AbRt$ER
+  return(AbRt)
+}
+
+# // --- Cumulative Abnormal Retunrs --- //
+CAR <- function(Data){
+  Data$CAR <- 0
+  Data$VAR_CAR <- 0
+  Data$CAR[1] = Data$AR[1]
+  Data$VAR_CAR[1] = Data$Var_AR[1]
+  for ( i in 2:nrow(Data)) {
+    Data$CAR[i] = Data$AR[i] + Data$CAR[i-1]
+    Data$VAR_CAR[i] = Data$Var_AR[i] + Data$VAR_CAR[i-1]
+  }
+  return(Data)
+}
+
+# // --- TAO --- //
+Tao2 <- function(Data,n,Companies){
+  Data$Tao <- 0
+for(j in 1:length(Companies)){
+  Emp <- Data[Data$EMP == Companies[j],]
+  a <- nrow(Emp)
+  b <- nrow(Emp)
+  test <- Emp[a:b,]
+  a <- nrow(Emp)-1
+  for (i in nrow(Emp):(n+1)) {
+    if (Emp$Enquesta_F[i-n] == 1) {
+      b = i
+      x <- Emp[a:b,]
+      x$Tao <- c(-1:-nrow(x))
+      test <- rbind(x,test)
+      a = i-1
+    }
+    if (Emp$Enquesta_F[i] == 1){
+      b = i
+      x <- Emp[a:b,]
+      x$Tao <- c((n-1):0)
+      test <- rbind(x,test)
+      a = i-1
+    }
+    if (i == n+1){
+      b = i-n
+      x <- Emp[a:b,]
+      x$Tao <- c(-1:-nrow(x))
+      test <- rbind(x,test)
+    }
+  }
+  if (j == 1){
+    DataX <- test
+  } else {
+    DataX <- rbind(DataX,test)
+    }
+}
+  DataX <- DataX[order(DataX$EMP,DataX$Date),]
+  return(DataX)
+}
+
+# // --- News Only PP and PSOE --- //
+Create_News_v2 <- function(Data,n,Companies) {
+for(j in 1:length(Companies)){
+  Data$TNew <- 0
+  Emp <- Data[Data$EMP == Companies[j],]
+  a <- 1
+  b <- 1
+  test <- Emp[0,]
+  for (i in 1:nrow(Emp)) {
+    if (Emp$Enquesta_F[i] == 1) {
+      b = i
+      x <- Emp[a:(b+n-1),]
+      new <- (Emp$Good.News[i]+Emp$Bad.News[i]*2)*max(Emp$PP.y[i],Emp$PSOE.y[i])
+      x$TNew <- new
+      test <- rbind(test,x)
+      i = i + n
+      a = i
+    }
+    if (i == nrow(Emp)){
+      b = i
+      x <- Emp[a:b,]
+      test <- rbind(test,x)
+    }
+  }
+  if (j == 1){
+    News <- test
+  } else {
+    News <- rbind(News,test)
+  }
+}
+News <- News[order(News$EMP,News$Date),]
+return(News)
+}
+
+# // --- News Only PP --- //
+Create_News_PP <- function(Data,n,Companies) {
+for(j in 1:length(Companies)){
+  Data$TNew <- 0
+  Emp <- Data[Data$EMP == Companies[j],]
+  a <- 1
+  b <- 1
+  test <- Emp[0,]
+  for (i in 1:nrow(Emp)) {
+    if (Emp$Enquesta_F[i] == 1) {
+      b = i
+      x <- Emp[a:(b+n-1),]
+      new <- (Emp$Good.News[i]+Emp$Bad.News[i]*2)*Emp$PP.y[i]
+      x$TNew <- new
+      test <- rbind(test,x)
+      i = i + n
+      a = i
+    }
+    if (i == nrow(Emp)){
+      b = i
+      x <- Emp[a:b,]
+      test <- rbind(test,x)
+    }
+  }
+  if (j == 1){
+    News <- test
+  } else {
+    News <- rbind(News,test)
+  }
+}
+News <- News[order(News$EMP,News$Date),]
+return(News)
+}
+
+# // --- News Only PSOE --- //
+Create_News_PSOE <- function(Data,n,Companies) {
+for(j in 1:length(Companies)){
+  Data$TNew <- 0
+  Emp <- Data[Data$EMP == Companies[j],]
+  a <- 1
+  b <- 1
+  test <- Emp[0,]
+  for (i in 1:nrow(Emp)) {
+    if (Emp$Enquesta_F[i] == 1) {
+      b = i
+      x <- Emp[a:(b+n-1),]
+      new <- (Emp$Good.News[i]+Emp$Bad.News[i]*2)*Emp$PSOE.y[i]
+      x$TNew <- new
+      test <- rbind(test,x)
+      i = i + n
+      a = i
+    }
+    if (i == nrow(Emp)){
+      b = i
+      x <- Emp[a:b,]
+      test <- rbind(test,x)
+    }
+  }
+  if (j == 1){
+    News <- test
+  } else {
+    News <- rbind(News,test)
+  }
+}
+News <- News[order(News$EMP,News$Date),]
+return(News)
+}
+
+# // --- Permanent Conection --- //
+New_Conection <- function(Data,Companies) {
+  test <- Data[0,]
+  for(j in 1:length(Companies)){
+  Emp <- Data[Data$EMP == Companies[j],]
+  a <- nrow(Emp)
+  for (i in 40:48) {
+    if (sum(Emp[,i]>0)){
+      for (k in 1:nrow(Emp)) {
+        if (Emp[k,i] == 1) {
+          # cat(paste(j,i,k), sep = "\n")
+          Emp[k:a,i] <- 1
+          k <- nrow(Emp)+1
+          }
+        }
+      }
+    }
+  test <- rbind(test,Emp)
+  }
+  return(test)
+}
+
+# // --- News all --- //
+Create_News_v3 <- function(Data,n,Companies) {
+  Data$TNew <- 0
+for(j in 1:length(Companies)){
+  Emp <- Data[Data$EMP == Companies[j],]
+  a <- 1
+  b <- 1
+  test <- Emp[0,]
+  for (i in 1:nrow(Emp)) {
+    if (Emp$Enquesta_F[i] == 1) {
+      b = i
+      x <- Emp[a:(b+n-1),]
+      new <- Emp$Good.News[i]+Emp$Bad.News[i]*2
+      x$TNew <- new
+      test <- rbind(test,x)
+      i = i + n
+      a = i
+    }
+    if (i == nrow(Emp)){
+      b = i
+      x <- Emp[a:b,]
+      test <- rbind(test,x)
+    }
+  }
+  if (j == 1){
+    News <- test
+  } else {
+    News <- rbind(News,test)
+  }
+}
+News <- News[order(News$EMP,News$Date),]
+return(News)
+}
+
+# // --- Varianza AR --- //
+
+Error_Variance <- function(Data,n,Companies,m){
+  Data$VAR <- 0
+for(j in 1:length(Companies)){
+  Emp <- Data[Data$EMP == Companies[j],]
+  a <- 1
+  b <- 1
+  # test <- Emp[a:b,]
+  a <- 2
+  for (i in (m-1):nrow(Emp)) {
+    if (Emp$Enquesta_F[i] == 1) {
+      b = i - n
+      a = b - (m-1)
+      x <- Emp[a:b,]
+      sigma <- sum((x$AR[!is.na(x$AR)])^2)/(m-2)
+      MRm <- sum(x$Rm)/(m-1) # Para comentar
+      sigmaM <- var(x$Rm) # Para comentar
+      a <- b + 1
+      b <- i + (n-1) 
+      Emp[a:b,]$VAR <-sigma + (1/m)*(1+((Emp[a:b,]$Rm-MRm)^2)/sigmaM) #----------- Se asume 0 por la longitud del vector
+      i = i + n
+    }
+  }
+  if (j == 1){
+    DataX <- Emp
+  } else {
+    DataX <- rbind(DataX,Emp)
+    }
+}
+  DataX <- DataX[order(DataX$EMP,DataX$Date),]
+  return(DataX)
+}
+
+
+```
+
+### Ejecucion primer tipo de conexion
+
+#### (1) Todos los partidos
+
+```{r echo = FALSE}
+# ---- Parametros ---- #
+n <- 16 #--- Dias a predecir por modelo incluido T0 antes y despues del evento
+m <- 720 #-------360 - 540 - 720
+
+names(Data1)[names(Data1) == 'Delta.Price.day.T' | names(Data1) == 'IBEX' ] <- c("Rt","Rm")
+Data1$Good.News <- ifelse(Data1$AVCjt > 0,1,0)
+Data1$Bad.News <- ifelse(Data1$AVCjt < 0,1,0)
+
+Data2 <- Data1 %>% select(Date,Close,EMP,Enquesta,Rt,Rm,Good.News,Bad.News,PP.y,PSOE.y)
+Data2 <- NormalReturns_v2(Data2,n,Companies,m)
+
+# ----- Seleccion de empresas con almenos 1 encuesta ----- #
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+Emp_delete <- Companies[!Companies%in%unique(Data2$EMP[Data2$Enquesta_F==1])]
+Data2 <- Data2[!(Data2$EMP %in% Emp_delete),]
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+
+# ----- Continuacion del Proceso ----- #
+Data2 <- Tao2(Data2,n,Companies)
+Data2 <- Create_News_v3(Data2,n,Companies)
+Data2 <- Error_Variance(Data2,n,Companies,m)
+
+# ----- Seleccion de datos por fecha ----- #
+# Data2 <- Data2 %>% filter(Date < '2012-11-16') # Para una ventana de n = 6
+# Data2 <- Data2 %>% filter(Date < '2012-11-23') # Para una ventana de n = 11
+Data2 <- Data2 %>% filter(Date < '2012-11-30') # Para una ventana de n = 16
+
+Data3 <- Data2 %>% filter(Tao >= (-n + 1)) %>% group_by(EMP,Tao,TNew) %>% #(-n + 1) si se quiere misma ventana
+  summarise(Enquesta = round(mean(Enquesta_F),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR1 = mean(AR,na.rm = T),
+            Var_AR = sum(VAR,na.rm = T)/(n()^2))
+
+Data3 <- Data3 %>% group_by(Tao,TNew) %>% #Agrupamos empresas
+  summarise(Enquesta = round(mean(Enquesta),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR = mean(AR1,na.rm = T),
+            Var_AR = sum(Var_AR,na.rm = T)/(n()^2))
+
+GNews <- Data3 %>% filter(TNew == 1)
+BNews <- Data3 %>% filter(TNew == 2)
+NNews <- Data3 %>% filter(TNew == 0)
+GNews <- CAR(GNews)
+BNews <- CAR(BNews)
+NNews <- CAR(NNews)
+
+
+GNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR), colour = 'green') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+NNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Neutral'), colour = 'gray45') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+BNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Bad'), colour = 'red') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+AbR <- data.frame(Tao = GNews$Tao, GCAR = GNews$CAR, BCAR = BNews$CAR, NCAR = NNews$CAR)
+AbR %>% ggplot(aes(x=Tao)) + geom_line(aes(y=GCAR,col='Good')) +
+  geom_line(aes(y=BCAR,col='Bad')) +
+  geom_line(aes(y=NCAR,col='Neutral'))+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+apply(table(Data2$EMP,Data2$TNew)>0, 2,sum)
+max(abs(GNews$CAR/sqrt(GNews$VAR_CAR)))
+max(abs(NNews$CAR/sqrt(NNews$VAR_CAR)))
+max(abs(BNews$CAR/sqrt(BNews$VAR_CAR)))
+```
+
+```{r include=FALSE}
+A <- as.matrix(head(Data2[Data2$EMP == 'A3M' & Data2$Date > '2007-02-19' ,1:10]))
+knitr::kable(A, caption = "TABLA II")
+```
+
+
+
+#### (2) Partidos PP y PSOE
+
+```{r echo = FALSE}
+# ---- Parametros ---- #
+n <- 16 #--- Dias a predecir por modelo incluido T0 antes y despues del evento
+m <- 720 #-------360 - 540 - 720
+
+names(Data1)[names(Data1) == 'Delta.Price.day.T' | names(Data1) == 'IBEX' ] <- c("Rt","Rm")
+Data1$Good.News <- ifelse(Data1$AVCjt > 0,1,0)
+Data1$Bad.News <- ifelse(Data1$AVCjt < 0,1,0)
+
+Data2 <- Data1 %>% select(Date,Close,EMP,Enquesta,Rt,Rm,Good.News,Bad.News,PP.y,PSOE.y)
+Data2 <- NormalReturns_v2(Data2,n,Companies,m)
+
+# ----- Seleccion de empresas con almenos 1 encuesta ----- #
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+Emp_delete <- Companies[!Companies%in%unique(Data2$EMP[Data2$Enquesta_F==1])]
+Data2 <- Data2[!(Data2$EMP %in% Emp_delete),]
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+
+# ----- Continuacion del Proceso ----- #
+Data2 <- Tao2(Data2,n,Companies)
+Data2 <- Create_News_v2(Data2,n,Companies)
+Data2 <- Error_Variance(Data2,n,Companies,m)
+
+# ----- Seleccion de datos por fecha ----- #
+# Data2 <- Data2 %>% filter(Date < '2012-11-16') # Para una ventana de n = 6
+# Data2 <- Data2 %>% filter(Date < '2012-11-23') # Para una ventana de n = 11
+Data2 <- Data2 %>% filter(Date < '2012-11-30') # Para una ventana de n = 16
+
+Data3 <- Data2 %>% filter(Tao >= (-n + 1)) %>% group_by(EMP,Tao,TNew) %>% #(-n + 1) si se quiere misma ventana
+  summarise(Enquesta = round(mean(Enquesta_F),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR1 = mean(AR,na.rm = T),
+            Var_AR = sum(VAR,na.rm = T)/(n()^2))
+
+Data3 <- Data3 %>% group_by(Tao,TNew) %>% #Agrupamos empresas
+  summarise(Enquesta = round(mean(Enquesta),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR = mean(AR1,na.rm = T),
+            Var_AR = sum(Var_AR,na.rm = T)/(n()^2))
+
+GNews <- Data3 %>% filter(TNew == 1)
+BNews <- Data3 %>% filter(TNew == 2)
+NNews <- Data3 %>% filter(TNew == 0)
+GNews <- CAR(GNews)
+BNews <- CAR(BNews)
+NNews <- CAR(NNews)
+
+GNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Good'), colour = 'green') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+NNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Neutral'), colour = 'gray45') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)
+
+BNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Bad'), colour = 'red') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)
+
+AbR1 <- data.frame(Tao = GNews$Tao, GCAR = GNews$CAR, BCAR = BNews$CAR, NCAR = NNews$CAR)
+AbR1 %>% ggplot(aes(x=Tao)) + geom_line(aes(y=GCAR,col='Good')) +
+  geom_line(aes(y=BCAR,col='Bad')) +
+  geom_line(aes(y=NCAR,col='Neutral'))+
+  geom_vline(xintercept = 0, lty = 3)
+
+apply(table(Data2$EMP,Data2$TNew)>0, 2,sum)
+max(abs(GNews$CAR/sqrt(GNews$VAR_CAR)))
+max(abs(NNews$CAR/sqrt(NNews$VAR_CAR)))
+max(abs(BNews$CAR/sqrt(BNews$VAR_CAR)))
+```
+
+#### (3) Partidos PP
+
+```{r echo = FALSE}
+# ---- Parametros ---- #
+n <- 16 #--- Dias a predecir por modelo incluido T0 antes y despues del evento
+m <- 720 #-------360 - 540 - 720
+
+names(Data1)[names(Data1) == 'Delta.Price.day.T' | names(Data1) == 'IBEX' ] <- c("Rt","Rm")
+Data1$Good.News <- ifelse(Data1$AVCjt > 0,1,0)
+Data1$Bad.News <- ifelse(Data1$AVCjt < 0,1,0)
+
+Data2 <- Data1 %>% select(Date,Close,EMP,Enquesta,Rt,Rm,Good.News,Bad.News,PP.y,PSOE.y)
+Data2 <- NormalReturns_v2(Data2,n,Companies,m)
+
+# ----- Seleccion de empresas con almenos 1 encuesta ----- #
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+Emp_delete <- Companies[!Companies%in%unique(Data2$EMP[Data2$Enquesta_F==1])]
+Data2 <- Data2[!(Data2$EMP %in% Emp_delete),]
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+
+# ----- Continuacion del Proceso ----- #
+Data2 <- Tao2(Data2,n,Companies)
+Data2 <- Create_News_PP(Data2,n,Companies)
+Data2 <- Error_Variance(Data2,n,Companies,m)
+
+# ----- Seleccion de datos por fecha ----- #
+# Data2 <- Data2 %>% filter(Date < '2012-11-16') # Para una ventana de n = 6
+# Data2 <- Data2 %>% filter(Date < '2012-11-23') # Para una ventana de n = 11
+Data2 <- Data2 %>% filter(Date < '2012-11-30') # Para una ventana de n = 16
+
+Data3 <- Data2 %>% filter(Tao >= (-n + 1)) %>% group_by(EMP,Tao,TNew) %>% #(-n + 1) si se quiere misma ventana
+  summarise(Enquesta = round(mean(Enquesta_F),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR1 = mean(AR,na.rm = T),
+            Var_AR = sum(VAR,na.rm = T)/(n()^2))
+
+Data3 <- Data3 %>% group_by(Tao,TNew) %>% #Agrupamos empresas
+  summarise(Enquesta = round(mean(Enquesta),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR = mean(AR1,na.rm = T),
+            Var_AR = sum(Var_AR,na.rm = T)/(n()^2))
+
+GNews <- Data3 %>% filter(TNew == 1)
+BNews <- Data3 %>% filter(TNew == 2)
+NNews <- Data3 %>% filter(TNew == 0)
+GNews <- CAR(GNews)
+BNews <- CAR(BNews)
+NNews <- CAR(NNews)
+
+GNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR), colour = 'green') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+NNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Neutral'), colour = 'gray45') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+BNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Bad'), colour = 'red') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+AbR2 <- data.frame(Tao = GNews$Tao, GCAR = GNews$CAR, BCAR = BNews$CAR, NCAR = NNews$CAR)
+AbR2 %>% ggplot(aes(x=Tao)) + geom_line(aes(y=GCAR,col='Good')) +
+  geom_line(aes(y=BCAR,col='Bad')) +
+  geom_line(aes(y=NCAR,col='Neutral'))+
+  geom_vline(xintercept = 0, lty = 3)
+
+apply(table(Data2$EMP,Data2$TNew)>0, 2,sum)
+max(abs(GNews$CAR/sqrt(GNews$VAR_CAR)))
+max(abs(NNews$CAR/sqrt(NNews$VAR_CAR)))
+max(abs(BNews$CAR/sqrt(BNews$VAR_CAR)))
+```
+
+
+#### (4) Partidos PSOE
+
+```{r echo = FALSE}
+# ---- Parametros ---- #
+n <- 16 #--- Dias a predecir por modelo incluido T0 antes y despues del evento
+m <- 720 #-------360 - 540 - 720
+
+names(Data1)[names(Data1) == 'Delta.Price.day.T' | names(Data1) == 'IBEX' ] <- c("Rt","Rm")
+Data1$Good.News <- ifelse(Data1$AVCjt > 0,1,0)
+Data1$Bad.News <- ifelse(Data1$AVCjt < 0,1,0)
+
+Data2 <- Data1 %>% select(Date,Close,EMP,Enquesta,Rt,Rm,Good.News,Bad.News,PP.y,PSOE.y)
+Data2 <- NormalReturns_v2(Data2,n,Companies,m)
+
+# ----- Seleccion de empresas con almenos 1 encuesta ----- #
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+Emp_delete <- Companies[!Companies%in%unique(Data2$EMP[Data2$Enquesta_F==1])]
+Data2 <- Data2[!(Data2$EMP %in% Emp_delete),]
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+
+# ----- Continuacion del Proceso ----- #
+Data2 <- Tao2(Data2,n,Companies)
+Data2 <- Create_News_PSOE(Data2,n,Companies)
+Data2 <- Error_Variance(Data2,n,Companies,m)
+
+# ----- Seleccion de datos por fecha ----- #
+# Data2 <- Data2 %>% filter(Date < '2012-11-16') # Para una ventana de n = 6
+# Data2 <- Data2 %>% filter(Date < '2012-11-23') # Para una ventana de n = 11
+Data2 <- Data2 %>% filter(Date < '2012-11-30') # Para una ventana de n = 16
+
+Data3 <- Data2 %>% filter(Tao >= (-n + 1)) %>% group_by(EMP,Tao,TNew) %>% #(-n + 1) si se quiere misma ventana
+  summarise(Enquesta = round(mean(Enquesta_F),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR1 = mean(AR,na.rm = T),
+            Var_AR = sum(VAR,na.rm = T)/(n()^2))
+
+Data3 <- Data3 %>% group_by(Tao,TNew) %>% #Agrupamos empresas
+  summarise(Enquesta = round(mean(Enquesta),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR = mean(AR1,na.rm = T),
+            Var_AR = sum(Var_AR,na.rm = T)/(n()^2))
+
+GNews <- Data3 %>% filter(TNew == 1)
+BNews <- Data3 %>% filter(TNew == 2)
+NNews <- Data3 %>% filter(TNew == 0)
+GNews <- CAR(GNews)
+BNews <- CAR(BNews)
+NNews <- CAR(NNews)
+
+GNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Good'), colour = 'green3') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)
+
+NNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Neutral'), colour = 'gray50') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)
+
+BNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Bad'), colour = 'red3') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)
+
+AbR3 <- data.frame(Tao = GNews$Tao, GCAR = GNews$CAR, BCAR = BNews$CAR, NCAR = NNews$CAR)
+AbR3 %>% ggplot(aes(x=Tao)) + geom_line(aes(y=GCAR), colour = 'green3') +
+  geom_line(aes(y=BCAR), colour = 'red3') +
+  geom_line(aes(y=NCAR), colour = 'gray50') +
+  geom_vline(xintercept = 0, lty = 3)
+
+apply(table(Data2$EMP,Data2$TNew)>0, 2,sum)
+max(abs(GNews$CAR/sqrt(GNews$VAR_CAR)))
+max(abs(NNews$CAR/sqrt(NNews$VAR_CAR)))
+max(abs(BNews$CAR/sqrt(BNews$VAR_CAR)))
+```
+
+Analisis rapido ventana 0 para PSOE
+
+```{r}
+x <- Data2 %>% filter(Tao == 7 & TNew == 0)
+
+x %>% ggplot(aes(x=EMP)) + geom_boxplot(aes(y=AR,col='g'))
+
+```
+
+
+#### Graficas de comparacion entre tipos de noticias
+
+```{r include = FALSE}
+# Graf1 <- data.frame(Tao = AbR1$Tao, NCAR1 = AbR1$NCAR, NCAR2 = AbR2$NCAR, NCAR3 = AbR3$NCAR)
+# 
+# Graf1 %>% ggplot(aes(x=Tao)) + geom_line(aes(y=NCAR1,col='PP-PSOE')) +
+#   geom_line(aes(y=NCAR2,col='PP')) +
+#   geom_line(aes(y=NCAR3,col='PSOE'))+
+#   geom_vline(xintercept = 0, lty = 3)
+# 
+# Graf2 <- data.frame(Tao = AbR1$Tao, GCAR1 = AbR1$GCAR, GCAR2 = AbR2$GCAR, GCAR3 = AbR3$GCAR)
+# 
+# Graf2 %>% ggplot(aes(x=Tao)) + geom_line(aes(y=GCAR1,col='PP-PSOE')) +
+#   geom_line(aes(y=GCAR2,col='PP')) +
+#   geom_line(aes(y=GCAR3,col='PSOE'))+
+#   geom_vline(xintercept = 0, lty = 3)
+# 
+# Graf3 <- data.frame(Tao = AbR1$Tao, BCAR1 = AbR1$BCAR, BCAR2 = AbR2$BCAR, BCAR3 = AbR3$BCAR)
+# 
+# Graf3 %>% ggplot(aes(x=Tao)) + geom_line(aes(y=BCAR1,col='PP-PSOE')) +
+#   geom_line(aes(y=BCAR2,col='PP')) +
+#   geom_line(aes(y=BCAR3,col='PSOE'))+
+#   geom_vline(xintercept = 0, lty = 3)
+```
+
+### Ejecucion Segundo tipo de conexion
+
+```{r}
+Data_v2 <- Data
+Data_v2 <- New_Conection(Data_v2,Companies)
+
+# // --- Creacion Variables --- //
+Data_v2$P.AVCjt <-(Data_v2$PSOE.x*Data_v2$PSOE.y)
+Data_v2$P.AVCjt <- Data_v2$P.AVCjt + (Data_v2$PP.x*Data_v2$PP.y)
+Data_v2$P.AVCjt <- Data_v2$P.AVCjt + (Data_v2$PNV.x*Data_v2$PNV.y)
+Data_v2$P.AVCjt <- Data_v2$P.AVCjt + (Data_v2$CIU.x*Data_v2$CIU.y)
+Data_v2$P.AVCjt <- Data_v2$P.AVCjt + (Data_v2$ERC.x*Data_v2$ERC.y)
+Data_v2$P.AVCjt <- Data_v2$P.AVCjt + (Data_v2$UPN.x*Data_v2$UPN.y)
+Data_v2$N.Party <- Data_v2$PP.y+Data_v2$PNV.y+Data_v2$PSOE.y+Data_v2$CIU.y+Data_v2$ERC.y+Data_v2$UPN.y
+Data_v2$AVCjt <-(Data_v2$P.AVCjt)/(Data_v2$N.Party+(Data_v2$N.Party==0))
+Data_v2$M.Vote <- round(apply(Data_v2[,12:35],1,mean),2)
+
+# filter(Data, Data$Enquesta == 1 & Data$Date == '2007-11-22' ) %>% view
+
+# // --- Seleccion de datos --- //
+x <- c(1,5,8:10,17,25,29,31,32,34,37:ncol(Data_v2))
+Data1 <- Data_v2[,x]
+Data1$Cijt <-  apply(Data_v2[,c(40:48)],1,max)
+```
+
+
+
+#### (1) Todos los partidos
+
+```{r echo = FALSE}
+# ---- Parametros ---- # 0.85714286 -- 0.133333333 ---7.01
+n <- 16 #--- Dias a predecir por modelo incluido T0 antes y despues del evento
+m <- 720 #-------360 - 540 - 720
+
+names(Data1)[names(Data1) == 'Delta.Price.day.T' | names(Data1) == 'IBEX' ] <- c("Rt","Rm")
+Data1$Good.News <- ifelse(Data1$AVCjt > 0,1,0)
+Data1$Bad.News <- ifelse(Data1$AVCjt < 0,1,0)
+
+Data2 <- Data1 %>% select(Date,Close,EMP,Enquesta,Rt,Rm,Good.News,Bad.News,PP.y,PSOE.y)
+Data2 <- NormalReturns_v2(Data2,n,Companies,m)
+
+# ----- Seleccion de empresas con almenos 1 encuesta ----- #
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+Emp_delete <- Companies[!Companies%in%unique(Data2$EMP[Data2$Enquesta_F==1])]
+Data2 <- Data2[!(Data2$EMP %in% Emp_delete),]
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+
+# ----- Continuacion del Proceso ----- #
+Data2 <- Tao2(Data2,n,Companies)
+Data2 <- Create_News_v3(Data2,n,Companies)
+Data2 <- Error_Variance(Data2,n,Companies,m)
+
+# ----- Seleccion de datos por fecha ----- #
+# Data2 <- Data2 %>% filter(Date < '2012-11-16') # Para una ventana de n = 6
+# Data2 <- Data2 %>% filter(Date < '2012-11-23') # Para una ventana de n = 11
+Data2 <- Data2 %>% filter(Date < '2012-11-30') # Para una ventana de n = 16
+
+Data3 <- Data2 %>% filter(Tao >= (-n + 1)) %>% group_by(EMP,Tao,TNew) %>% #(-n + 1) si se quiere misma ventana
+  summarise(Enquesta = round(mean(Enquesta_F),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR1 = mean(AR,na.rm = T),
+            Var_AR = sum(VAR,na.rm = T)/(n()^2))
+
+Data3 <- Data3 %>% group_by(Tao,TNew) %>% #Agrupamos empresas
+  summarise(Enquesta = round(mean(Enquesta),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR = mean(AR1,na.rm = T),
+            Var_AR = sum(Var_AR,na.rm = T)/(n()^2))
+
+GNews <- Data3 %>% filter(TNew == 1)
+BNews <- Data3 %>% filter(TNew == 2)
+NNews <- Data3 %>% filter(TNew == 0)
+GNews <- CAR(GNews)
+BNews <- CAR(BNews)
+NNews <- CAR(NNews)
+
+GNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR), colour = 'green') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+NNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Neutral'), colour = 'gray45') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+BNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Bad'), colour = 'red') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+AbR <- data.frame(Tao = GNews$Tao, GCAR = GNews$CAR, BCAR = BNews$CAR, NCAR = NNews$CAR)
+AbR %>% ggplot(aes(x=Tao)) + geom_line(aes(y=GCAR,col='Good')) +
+  geom_line(aes(y=BCAR,col='Bad')) +
+  geom_line(aes(y=NCAR,col='Neutral'))+
+  geom_vline(xintercept = 0, lty = 3)
+
+apply(table(Data2$EMP,Data2$TNew)>0, 2,sum)
+
+max(abs(GNews$CAR/sqrt(GNews$VAR_CAR)))
+max(abs(NNews$CAR/sqrt(NNews$VAR_CAR)))
+max(abs(BNews$CAR/sqrt(BNews$VAR_CAR)))
+```
+
+#### (2) Partidos PP y PSOE
+
+```{r echo = FALSE}
+# ---- Parametros ---- #
+n <- 16 #--- Dias a predecir por modelo incluido T0 antes y despues del evento
+m <- 720 #-------360 - 540 - 720
+
+names(Data1)[names(Data1) == 'Delta.Price.day.T' | names(Data1) == 'IBEX' ] <- c("Rt","Rm")
+Data1$Good.News <- ifelse(Data1$AVCjt > 0,1,0)
+Data1$Bad.News <- ifelse(Data1$AVCjt < 0,1,0)
+
+Data2 <- Data1 %>% select(Date,Close,EMP,Enquesta,Rt,Rm,Good.News,Bad.News,PP.y,PSOE.y)
+Data2 <- NormalReturns_v2(Data2,n,Companies,m)
+
+# ----- Seleccion de empresas con almenos 1 encuesta ----- #
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+Emp_delete <- Companies[!Companies%in%unique(Data2$EMP[Data2$Enquesta_F==1])]
+Data2 <- Data2[!(Data2$EMP %in% Emp_delete),]
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+
+# ----- Continuacion del Proceso ----- #
+Data2 <- Tao2(Data2,n,Companies)
+Data2 <- Create_News_v2(Data2,n,Companies)
+Data2 <- Error_Variance(Data2,n,Companies,m)
+
+# ----- Seleccion de datos por fecha ----- #
+# Data2 <- Data2 %>% filter(Date < '2012-11-16') # Para una ventana de n = 6
+# Data2 <- Data2 %>% filter(Date < '2012-11-23') # Para una ventana de n = 11
+Data2 <- Data2 %>% filter(Date < '2012-11-30') # Para una ventana de n = 16
+
+Data3 <- Data2 %>% filter(Tao >= (-n + 1)) %>% group_by(EMP,Tao,TNew) %>% #(-n + 1) si se quiere misma ventana
+  summarise(Enquesta = round(mean(Enquesta_F),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR1 = mean(AR,na.rm = T),
+            Var_AR = sum(VAR,na.rm = T)/(n()^2))
+
+Data3 <- Data3 %>% group_by(Tao,TNew) %>% #Agrupamos empresas
+  summarise(Enquesta = round(mean(Enquesta),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR = mean(AR1,na.rm = T),
+            Var_AR = sum(Var_AR,na.rm = T)/(n()^2))
+
+GNews <- Data3 %>% filter(TNew == 1)
+BNews <- Data3 %>% filter(TNew == 2)
+NNews <- Data3 %>% filter(TNew == 0)
+GNews <- CAR(GNews)
+BNews <- CAR(BNews)
+NNews <- CAR(NNews)
+
+GNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR), colour = 'green') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+NNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Neutral'), colour = 'gray45') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+BNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Bad'), colour = 'red') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+AbR1 <- data.frame(Tao = GNews$Tao, GCAR = GNews$CAR, BCAR = BNews$CAR, NCAR = NNews$CAR)
+AbR1 %>% ggplot(aes(x=Tao)) + geom_line(aes(y=GCAR,col='Good')) +
+  geom_line(aes(y=BCAR,col='Bad')) +
+  geom_line(aes(y=NCAR,col='Neutral'))+
+  geom_vline(xintercept = 0, lty = 3)
+
+apply(table(Data2$EMP,Data2$TNew)>0, 2,sum)
+
+max(abs(GNews$CAR/sqrt(GNews$VAR_CAR)))
+max(abs(NNews$CAR/sqrt(NNews$VAR_CAR)))
+max(abs(BNews$CAR/sqrt(BNews$VAR_CAR)))
+```
+
+#### (3) Partidos PP
+
+```{r echo = FALSE}
+# ---- Parametros ---- #
+n <- 16 #--- Dias a predecir por modelo incluido T0 antes y despues del evento
+m <- 720 #-------360 - 540 - 720
+
+names(Data1)[names(Data1) == 'Delta.Price.day.T' | names(Data1) == 'IBEX' ] <- c("Rt","Rm")
+Data1$Good.News <- ifelse(Data1$AVCjt > 0,1,0)
+Data1$Bad.News <- ifelse(Data1$AVCjt < 0,1,0)
+
+Data2 <- Data1 %>% select(Date,Close,EMP,Enquesta,Rt,Rm,Good.News,Bad.News,PP.y,PSOE.y)
+Data2 <- NormalReturns_v2(Data2,n,Companies,m)
+
+# ----- Seleccion de empresas con almenos 1 encuesta ----- #
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+Emp_delete <- Companies[!Companies%in%unique(Data2$EMP[Data2$Enquesta_F==1])]
+Data2 <- Data2[!(Data2$EMP %in% Emp_delete),]
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+
+# ----- Continuacion del Proceso ----- #
+Data2 <- Tao2(Data2,n,Companies)
+Data2 <- Create_News_PP(Data2,n,Companies)
+Data2 <- Error_Variance(Data2,n,Companies,m)
+
+# ----- Seleccion de datos por fecha ----- #
+# Data2 <- Data2 %>% filter(Date < '2012-11-16') # Para una ventana de n = 6
+# Data2 <- Data2 %>% filter(Date < '2012-11-23') # Para una ventana de n = 11
+Data2 <- Data2 %>% filter(Date < '2012-11-30') # Para una ventana de n = 16
+
+Data3 <- Data2 %>% filter(Tao >= (-n + 1)) %>% group_by(EMP,Tao,TNew) %>% #(-n + 1) si se quiere misma ventana
+  summarise(Enquesta = round(mean(Enquesta_F),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR1 = mean(AR,na.rm = T),
+            Var_AR = sum(VAR,na.rm = T)/(n()^2))
+
+Data3 <- Data3 %>% group_by(Tao,TNew) %>% #Agrupamos empresas
+  summarise(Enquesta = round(mean(Enquesta),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR = mean(AR1,na.rm = T),
+            Var_AR = sum(Var_AR,na.rm = T)/(n()^2))
+
+GNews <- Data3 %>% filter(TNew == 1)
+BNews <- Data3 %>% filter(TNew == 2)
+NNews <- Data3 %>% filter(TNew == 0)
+GNews <- CAR(GNews)
+BNews <- CAR(BNews)
+NNews <- CAR(NNews)
+
+GNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR), colour = 'green') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+NNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Neutral'), colour = 'gray45') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+BNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Bad'), colour = 'red') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+AbR2 <- data.frame(Tao = GNews$Tao, GCAR = GNews$CAR, BCAR = BNews$CAR, NCAR = NNews$CAR)
+AbR2 %>% ggplot(aes(x=Tao)) + geom_line(aes(y=GCAR,col='Good')) +
+  geom_line(aes(y=BCAR,col='Bad')) +
+  geom_line(aes(y=NCAR,col='Neutral'))+
+  geom_vline(xintercept = 0, lty = 3)
+
+apply(table(Data2$EMP,Data2$TNew)>0, 2,sum)
+
+max(abs(GNews$CAR/sqrt(GNews$VAR_CAR)))
+max(abs(NNews$CAR/sqrt(NNews$VAR_CAR)))
+max(abs(BNews$CAR/sqrt(BNews$VAR_CAR)))
+```
+
+
+#### (4) Partidos PSOE
+
+```{r echo = FALSE}
+# ---- Parametros ---- #
+n <- 16 #--- Dias a predecir por modelo incluido T0 antes y despues del evento
+m <- 720 #-------360 - 540 - 720
+
+names(Data1)[names(Data1) == 'Delta.Price.day.T' | names(Data1) == 'IBEX' ] <- c("Rt","Rm")
+Data1$Good.News <- ifelse(Data1$AVCjt > 0,1,0)
+Data1$Bad.News <- ifelse(Data1$AVCjt < 0,1,0)
+
+Data2 <- Data1 %>% select(Date,Close,EMP,Enquesta,Rt,Rm,Good.News,Bad.News,PP.y,PSOE.y)
+Data2 <- NormalReturns_v2(Data2,n,Companies,m)
+
+# ----- Seleccion de empresas con almenos 1 encuesta ----- #
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+Emp_delete <- Companies[!Companies%in%unique(Data2$EMP[Data2$Enquesta_F==1])]
+Data2 <- Data2[!(Data2$EMP %in% Emp_delete),]
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+
+# ----- Continuacion del Proceso ----- #
+Data2 <- Tao2(Data2,n,Companies)
+Data2 <- Create_News_PSOE(Data2,n,Companies)
+Data2 <- Error_Variance(Data2,n,Companies,m)
+
+# ----- Seleccion de datos por fecha ----- #
+# Data2 <- Data2 %>% filter(Date < '2012-11-16') # Para una ventana de n = 6
+# Data2 <- Data2 %>% filter(Date < '2012-11-23') # Para una ventana de n = 11
+Data2 <- Data2 %>% filter(Date < '2012-11-30') # Para una ventana de n = 16
+
+Data3 <- Data2 %>% filter(Tao >= (-n + 1)) %>% group_by(EMP,Tao,TNew) %>% #(-n + 1) si se quiere misma ventana
+  summarise(Enquesta = round(mean(Enquesta_F),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR1 = mean(AR,na.rm = T),
+            Var_AR = sum(VAR,na.rm = T)/(n()^2))
+
+Data3 <- Data3 %>% group_by(Tao,TNew) %>% #Agrupamos empresas
+  summarise(Enquesta = round(mean(Enquesta),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR = mean(AR1,na.rm = T),
+            Var_AR = sum(Var_AR,na.rm = T)/(n()^2))
+
+GNews <- Data3 %>% filter(TNew == 1)
+BNews <- Data3 %>% filter(TNew == 2)
+NNews <- Data3 %>% filter(TNew == 0)
+GNews <- CAR(GNews)
+BNews <- CAR(BNews)
+NNews <- CAR(NNews)
+
+GNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR), colour = 'green') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+NNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Neutral'), colour = 'gray45') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+BNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Bad'), colour = 'red') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+AbR3 <- data.frame(Tao = GNews$Tao, GCAR = GNews$CAR, BCAR = BNews$CAR, NCAR = NNews$CAR)
+AbR3 %>% ggplot(aes(x=Tao)) + geom_line(aes(y=GCAR,col='Good')) +
+  geom_line(aes(y=BCAR,col='Bad')) +
+  geom_line(aes(y=NCAR,col='Neutral'))+
+  geom_vline(xintercept = 0, lty = 3)
+
+apply(table(Data2$EMP,Data2$TNew)>0, 2,sum)
+max(abs(GNews$CAR/sqrt(GNews$VAR_CAR)))
+max(abs(NNews$CAR/sqrt(NNews$VAR_CAR)))
+max(abs(BNews$CAR/sqrt(BNews$VAR_CAR)))
+```
+
+#### Graficas de comparacion entre tipos de noticias
+
+```{r include = FALSE}
+Graf1 <- data.frame(Tao = AbR1$Tao, NCAR1 = AbR1$NCAR, NCAR2 = AbR2$NCAR, NCAR3 = AbR3$NCAR)
+
+Graf1 %>% ggplot(aes(x=Tao)) + geom_line(aes(y=NCAR1,col='PP-PSOE')) +
+  geom_line(aes(y=NCAR2,col='PP')) +
+  geom_line(aes(y=NCAR3,col='PSOE'))+
+  geom_vline(xintercept = 0, lty = 3)
+
+Graf2 <- data.frame(Tao = AbR1$Tao, GCAR1 = AbR1$GCAR, GCAR2 = AbR2$GCAR, GCAR3 = AbR3$GCAR)
+
+Graf2 %>% ggplot(aes(x=Tao)) + geom_line(aes(y=GCAR1,col='PP-PSOE')) +
+  geom_line(aes(y=GCAR2,col='PP')) +
+  geom_line(aes(y=GCAR3,col='PSOE'))+
+  geom_vline(xintercept = 0, lty = 3)
+
+Graf3 <- data.frame(Tao = AbR1$Tao, BCAR1 = AbR1$BCAR, BCAR2 = AbR2$BCAR, BCAR3 = AbR3$BCAR)
+
+Graf3 %>% ggplot(aes(x=Tao)) + geom_line(aes(y=BCAR1,col='PP-PSOE')) +
+  geom_line(aes(y=BCAR2,col='PP')) +
+  geom_line(aes(y=BCAR3,col='PSOE'))+
+  geom_vline(xintercept = 0, lty = 3)
+```
+
+### Ejecucion Segundo tipo de conexion evaluando solo encuestas de los años de elecciones generales contenidos en el estudio
+
+#### (1) Todos los partidos
+
+```{r echo = FALSE}
+# ---- Parametros ---- #
+n <- 16 #--- Dias a predecir por modelo incluido T0 antes y despues del evento
+m <- 720 #-------360 - 540 - 720
+
+names(Data1)[names(Data1) == 'Delta.Price.day.T' | names(Data1) == 'IBEX' ] <- c("Rt","Rm")
+Data1$Good.News <- ifelse(Data1$AVCjt > 0,1,0)
+Data1$Bad.News <- ifelse(Data1$AVCjt < 0,1,0)
+Electoral_filter <- (Data1$Date>'2007-03-09' & Data1$Date<'2008-03-09') | (Data1$Date>'2010-11-20' & Data1$Date<'2011-11-20')	
+Data1$Enquesta <- Data1$Enquesta*Electoral_filter
+
+Data2 <- Data1 %>% select(Date,Close,EMP,Enquesta,Rt,Rm,Good.News,Bad.News,PP.y,PSOE.y)
+Data2 <- NormalReturns_v2(Data2,n,Companies,m)
+
+# ----- Seleccion de empresas con almenos 1 encuesta ----- #
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+Emp_delete <- Companies[!Companies%in%unique(Data2$EMP[Data2$Enquesta_F==1])]
+Data2 <- Data2[!(Data2$EMP %in% Emp_delete),]
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+
+# ----- Continuacion del Proceso ----- #
+Data2 <- Tao2(Data2,n,Companies)
+Data2 <- Create_News_v3(Data2,n,Companies)
+Data2 <- Error_Variance(Data2,n,Companies,m)
+
+# ----- Seleccion de datos por fecha - Tope 2011-10-26----- #
+# Data2 <- Data2 %>% filter(Date < '2011-11-03') # Para una ventana de n = 6
+# Data2 <- Data2 %>% filter(Date < '2011-11-10') # Para una ventana de n = 11
+Data2 <- Data2 %>% filter(Date < '2011-11-17') # Para una ventana de n = 16
+
+Data3 <- Data2 %>% filter(Tao >= (-n + 1)) %>% group_by(EMP,Tao,TNew) %>% #(-n + 1) si se quiere misma ventana
+  summarise(Enquesta = round(mean(Enquesta_F),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR1 = mean(AR,na.rm = T),
+            Var_AR = sum(VAR,na.rm = T)/(n()^2))
+
+Data3 <- Data3 %>% group_by(Tao,TNew) %>% #Agrupamos empresas
+  summarise(Enquesta = round(mean(Enquesta),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR = mean(AR1,na.rm = T),
+            Var_AR = sum(Var_AR,na.rm = T)/(n()^2))
+
+GNews <- Data3 %>% filter(TNew == 1)
+BNews <- Data3 %>% filter(TNew == 2)
+NNews <- Data3 %>% filter(TNew == 0)
+GNews <- CAR(GNews)
+BNews <- CAR(BNews)
+NNews <- CAR(NNews)
+
+GNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR), colour = 'green') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+NNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Neutral'), colour = 'gray45') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+BNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Bad'), colour = 'red') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+AbR <- data.frame(Tao = GNews$Tao, GCAR = GNews$CAR, BCAR = BNews$CAR, NCAR = NNews$CAR)
+AbR %>% ggplot(aes(x=Tao)) + geom_line(aes(y=GCAR,col='Good')) +
+  geom_line(aes(y=BCAR,col='Bad')) +
+  geom_line(aes(y=NCAR,col='Neutral'))+
+  geom_vline(xintercept = 0, lty = 3)
+
+apply(table(Data2$EMP,Data2$TNew)>0, 2,sum)
+
+max(GNews$CAR/sqrt(GNews$VAR_CAR))
+max(NNews$CAR/sqrt(NNews$VAR_CAR))
+max(BNews$CAR/sqrt(BNews$VAR_CAR))
+```
+
+```{r include = FALSE}
+# setwd("/home/brayan/Documents/TFM/R-Code")
+# write_csv(Data,'DataReg.csv')
+```
+
+#### (2) Partidos PP y PSOE
+
+```{r echo = FALSE}
+# ---- Parametros ---- #
+n <- 16 #--- Dias a predecir por modelo incluido T0 antes y despues del evento
+m <- 720 #-------360 - 540 - 720
+
+names(Data1)[names(Data1) == 'Delta.Price.day.T' | names(Data1) == 'IBEX' ] <- c("Rt","Rm")
+Data1$Good.News <- ifelse(Data1$AVCjt > 0,1,0)
+Data1$Bad.News <- ifelse(Data1$AVCjt < 0,1,0)
+Electoral_filter <- (Data1$Date>'2007-03-09' & Data1$Date<'2008-03-09') | (Data1$Date>'2010-11-20' & Data1$Date<'2011-11-20')
+Data1$Enquesta <- Data1$Enquesta*Electoral_filter
+
+Data2 <- Data1 %>% select(Date,Close,EMP,Enquesta,Rt,Rm,Good.News,Bad.News,PP.y,PSOE.y)
+Data2 <- NormalReturns_v2(Data2,n,Companies,m)
+# ----- Seleccion de empresas con almenos 1 encuesta ----- #
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+Emp_delete <- Companies[!Companies%in%unique(Data2$EMP[Data2$Enquesta_F==1])]
+Data2 <- Data2[!(Data2$EMP %in% Emp_delete),]
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+
+# ----- Continuacion del Proceso ----- #
+Data2 <- Tao2(Data2,n,Companies)
+Data2 <- Create_News_v2(Data2,n,Companies)
+Data2 <- Error_Variance(Data2,n,Companies,m)
+
+# ----- Seleccion de datos por fecha - Tope 2011-10-26----- #
+# Data2 <- Data2 %>% filter(Date < '2011-11-03') # Para una ventana de n = 6
+# Data2 <- Data2 %>% filter(Date < '2011-11-10') # Para una ventana de n = 11
+Data2 <- Data2 %>% filter(Date < '2011-11-17') # Para una ventana de n = 16
+
+Data3 <- Data2 %>% filter(Tao >= (-n + 1)) %>% group_by(EMP,Tao,TNew) %>% #(-n + 1) si se quiere misma ventana
+  summarise(Enquesta = round(mean(Enquesta_F),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR1 = mean(AR,na.rm = T),
+            Var_AR = sum(VAR,na.rm = T)/(n()^2))
+
+Data3 <- Data3 %>% group_by(Tao,TNew) %>% #Agrupamos empresas
+  summarise(Enquesta = round(mean(Enquesta),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR = mean(AR1,na.rm = T),
+            Var_AR = sum(Var_AR,na.rm = T)/(n()^2))
+
+GNews <- Data3 %>% filter(TNew == 1)
+BNews <- Data3 %>% filter(TNew == 2)
+NNews <- Data3 %>% filter(TNew == 0)
+GNews <- CAR(GNews)
+BNews <- CAR(BNews)
+NNews <- CAR(NNews)
+
+GNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR), colour = 'green') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+NNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Neutral'), colour = 'gray45') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+BNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Bad'), colour = 'red') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+AbR1 <- data.frame(Tao = GNews$Tao, GCAR = GNews$CAR, BCAR = BNews$CAR, NCAR = NNews$CAR)
+AbR1 %>% ggplot(aes(x=Tao)) + geom_line(aes(y=GCAR,col='Good')) +
+  geom_line(aes(y=BCAR,col='Bad')) +
+  geom_line(aes(y=NCAR,col='Neutral'))+
+  geom_vline(xintercept = 0, lty = 3)
+
+apply(table(Data2$EMP,Data2$TNew)>0, 2,sum)
+max(GNews$CAR/sqrt(GNews$VAR_CAR))
+max(NNews$CAR/sqrt(NNews$VAR_CAR))
+max(BNews$CAR/sqrt(BNews$VAR_CAR))
+```
+#### (3) Partidos PP
+
+```{r echo = FALSE}
+# ---- Parametros ---- #
+n <- 16 #--- Dias a predecir por modelo incluido T0 antes y despues del evento
+m <- 720 #-------360 - 540 - 720
+
+names(Data1)[names(Data1) == 'Delta.Price.day.T' | names(Data1) == 'IBEX' ] <- c("Rt","Rm")
+Data1$Good.News <- ifelse(Data1$AVCjt > 0,1,0)
+Data1$Bad.News <- ifelse(Data1$AVCjt < 0,1,0)
+Electoral_filter <- (Data1$Date>'2007-03-09' & Data1$Date<'2008-03-09') | (Data1$Date>'2010-11-20' & Data1$Date<'2011-11-20')
+Data1$Enquesta <- Data1$Enquesta*Electoral_filter
+
+Data2 <- Data1 %>% select(Date,Close,EMP,Enquesta,Rt,Rm,Good.News,Bad.News,PP.y,PSOE.y)
+Data2 <- NormalReturns_v2(Data2,n,Companies,m)
+
+# ----- Seleccion de empresas con almenos 1 encuesta ----- #
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+Emp_delete <- Companies[!Companies%in%unique(Data2$EMP[Data2$Enquesta_F==1])]
+Data2 <- Data2[!(Data2$EMP %in% Emp_delete),]
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+
+# ----- Continuacion del Proceso ----- #
+Data2 <- Tao2(Data2,n,Companies)
+Data2 <- Create_News_PP(Data2,n,Companies)
+Data2 <- Error_Variance(Data2,n,Companies,m)
+
+# ----- Seleccion de datos por fecha - Tope 2011-10-26----- #
+# Data2 <- Data2 %>% filter(Date < '2011-11-03') # Para una ventana de n = 6
+# Data2 <- Data2 %>% filter(Date < '2011-11-10') # Para una ventana de n = 11
+Data2 <- Data2 %>% filter(Date < '2011-11-17') # Para una ventana de n = 16
+
+Data3 <- Data2 %>% filter(Tao >= (-n + 1)) %>% group_by(EMP,Tao,TNew) %>% #(-n + 1) si se quiere misma ventana
+  summarise(Enquesta = round(mean(Enquesta_F),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR1 = mean(AR,na.rm = T),
+            Var_AR = sum(VAR,na.rm = T)/(n()^2))
+
+Data3 <- Data3 %>% group_by(Tao,TNew) %>% #Agrupamos empresas
+  summarise(Enquesta = round(mean(Enquesta),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR = mean(AR1,na.rm = T),
+            Var_AR = sum(Var_AR,na.rm = T)/(n()^2))
+
+GNews <- Data3 %>% filter(TNew == 1)
+BNews <- Data3 %>% filter(TNew == 2)
+NNews <- Data3 %>% filter(TNew == 0)
+GNews <- CAR(GNews)
+BNews <- CAR(BNews)
+NNews <- CAR(NNews)
+
+GNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR), colour = 'green') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+NNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Neutral'), colour = 'gray45') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+BNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Bad'), colour = 'red') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+AbR2 <- data.frame(Tao = GNews$Tao, GCAR = GNews$CAR, BCAR = BNews$CAR, NCAR = NNews$CAR)
+AbR2 %>% ggplot(aes(x=Tao)) + geom_line(aes(y=GCAR,col='Good')) +
+  geom_line(aes(y=BCAR,col='Bad')) +
+  geom_line(aes(y=NCAR,col='Neutral'))+
+  geom_vline(xintercept = 0, lty = 3)
+
+apply(table(Data2$EMP,Data2$TNew)>0, 2,sum)
+max(GNews$CAR/sqrt(GNews$VAR_CAR))
+max(NNews$CAR/sqrt(NNews$VAR_CAR))
+max(BNews$CAR/sqrt(BNews$VAR_CAR))
+```
+
+#### (4) Partidos PSOE
+
+```{r echo = FALSE}
+# ---- Parametros ---- #
+n <- 16 #--- Dias a predecir por modelo incluido T0 antes y despues del evento
+m <- 720 #-------360 - 540 - 720
+
+names(Data1)[names(Data1) == 'Delta.Price.day.T' | names(Data1) == 'IBEX' ] <- c("Rt","Rm")
+Data1$Good.News <- ifelse(Data1$AVCjt > 0,1,0)
+Data1$Bad.News <- ifelse(Data1$AVCjt < 0,1,0)
+Electoral_filter <- (Data1$Date>'2007-03-09' & Data1$Date<'2008-03-09') | (Data1$Date>'2010-11-20' & Data1$Date<'2011-11-20')
+Data1$Enquesta <- Data1$Enquesta*Electoral_filter
+
+Data2 <- Data1 %>% select(Date,Close,EMP,Enquesta,Rt,Rm,Good.News,Bad.News,PP.y,PSOE.y)
+Data2 <- NormalReturns_v2(Data2,n,Companies,m)
+
+# ----- Seleccion de empresas con almenos 1 encuesta ----- #
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+Emp_delete <- Companies[!Companies%in%unique(Data2$EMP[Data2$Enquesta_F==1])]
+Data2 <- Data2[!(Data2$EMP %in% Emp_delete),]
+Companies <- levels(Data2$EMP)[levels(Data2$EMP) %in% unique(Data2$EMP)]
+
+# ----- Continuacion del Proceso ----- #
+Data2 <- Tao2(Data2,n,Companies)
+Data2 <- Create_News_PSOE(Data2,n,Companies)
+Data2 <- Error_Variance(Data2,n,Companies,m)
+
+# ----- Seleccion de datos por fecha - Tope 2011-10-26----- #
+# Data2 <- Data2 %>% filter(Date < '2011-11-03') # Para una ventana de n = 6
+# Data2 <- Data2 %>% filter(Date < '2011-11-10') # Para una ventana de n = 11
+Data2 <- Data2 %>% filter(Date < '2011-11-17') # Para una ventana de n = 16
+
+Data3 <- Data2 %>% filter(Tao >= (-n + 1)) %>% group_by(EMP,Tao,TNew) %>% #(-n + 1) si se quiere misma ventana
+  summarise(Enquesta = round(mean(Enquesta_F),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR1 = mean(AR,na.rm = T),
+            Var_AR = sum(VAR,na.rm = T)/(n()^2))
+
+Data3 <- Data3 %>% group_by(Tao,TNew) %>% #Agrupamos empresas
+  summarise(Enquesta = round(mean(Enquesta),0),
+            Rt = mean(Rt),
+            Rm = mean(Rm,na.rm = T),
+            ER = mean(ER,na.rm = T),
+            AR = mean(AR1,na.rm = T),
+            Var_AR = sum(Var_AR,na.rm = T)/(n()^2))
+
+GNews <- Data3 %>% filter(TNew == 1)
+BNews <- Data3 %>% filter(TNew == 2)
+NNews <- Data3 %>% filter(TNew == 0)
+GNews <- CAR(GNews)
+BNews <- CAR(BNews)
+NNews <- CAR(NNews)
+
+GNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR), colour = 'green') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+NNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Neutral'), colour = 'gray45') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+BNews %>% ggplot(aes(x=Tao)) + geom_line(aes(y=CAR,col='Bad'), colour = 'red') +
+  geom_line(aes(y=(CAR+2*sqrt(VAR_CAR)),col='TOP'), colour = 'blue') +
+  geom_line(aes(y=(CAR-2*sqrt(VAR_CAR)),col='BOT'), colour = 'blue')+
+  geom_vline(xintercept = 0, lty = 3)+
+  geom_hline(yintercept = 0, lty = 3)
+
+AbR2 <- data.frame(Tao = GNews$Tao, GCAR = GNews$CAR, BCAR = BNews$CAR, NCAR = NNews$CAR)
+AbR2 %>% ggplot(aes(x=Tao)) + geom_line(aes(y=GCAR,col='Good')) +
+  geom_line(aes(y=BCAR,col='Bad')) +
+  geom_line(aes(y=NCAR,col='Neutral'))+
+  geom_vline(xintercept = 0, lty = 3)
+
+apply(table(Data2$EMP,Data2$TNew)>0, 2,sum)
+max(GNews$CAR/sqrt(GNews$VAR_CAR))
+max(NNews$CAR/sqrt(NNews$VAR_CAR))
+max(BNews$CAR/sqrt(BNews$VAR_CAR))
+```
